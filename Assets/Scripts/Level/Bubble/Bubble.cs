@@ -14,14 +14,10 @@ namespace BubbleShooter
         [SerializeField] private float _explodeSpeed = 5f;
         [SerializeField] private float _collapsePointY = -30f;
 
-        private int _bubbleColumn;
-        public int BubbleColumns => _bubbleColumn;
-        private int _bubbleRow;
-        public int BubbleRow => _bubbleRow;
-        private int _bubbleType;
-        public int BubbleType => _bubbleType;
-        private string _bubbleState;
-        public string BubbleState => _bubbleState;
+        public int BubbleColumns { get; private set; }
+        public int BubbleRow { get; private set; }
+        public int BubbleType { get; private set; }
+        public string BubbleState { get; private set; }
 
         private CircleCollider2D _circleCollider;
         #endregion
@@ -35,33 +31,7 @@ namespace BubbleShooter
 
         public void Update()
         {
-            if (_bubbleState == "Pop")
-            {
-                if (_circleCollider != null)
-                    _circleCollider.enabled = false;
-
-                transform.localScale = transform.localScale * _popSpeed;
-                if (transform.localScale.sqrMagnitude < 0.05f)
-                    Destroy(gameObject);
-            }
-            else if (_bubbleState == "Explode")
-            {
-                if (_circleCollider != null)
-                    _circleCollider.enabled = false;
-
-                TryGetComponent(out Rigidbody2D rigidbody);
-                if (rigidbody != null)
-                {
-                    rigidbody.gravityScale = 1f;
-                    rigidbody.velocity = new Vector3(Random.Range(-_explodeSpeed, _explodeSpeed), Random.Range(-_explodeSpeed, _explodeSpeed), 0f);
-                }
-                _bubbleState = "Fall";
-            }
-            else if (_bubbleState == "Fall")
-            {
-                if (transform.position.y < _collapsePointY)
-                    Destroy(gameObject);
-            }
+            ApplyStateBehaviour();
         }
 
         private void OnTriggerEnter2D(Collider2D collision)
@@ -82,14 +52,50 @@ namespace BubbleShooter
         #region Public API
         public void SetGridPosition(int column, int row, int type)
         {
-            _bubbleRow = row;
-            _bubbleColumn = column;
-            _bubbleType = type;
+            BubbleRow = row;
+            BubbleColumns = column;
+            BubbleType = type;
         }
         public void SetBubbleState(string state)
         {
-            _bubbleState = state;
+            BubbleState = state;
         }
+        #endregion
+
+        #region Private API
+        private void ApplyStateBehaviour()
+        {
+            switch (BubbleState)
+            {
+                case "Pop":
+                    if (_circleCollider != null)
+                        _circleCollider.enabled = false;
+
+                    transform.localScale = transform.localScale * _popSpeed;
+                    if (transform.localScale.sqrMagnitude < 0.05f)
+                        Destroy(gameObject);
+                    break;
+
+                case "Explode":
+                    if (_circleCollider != null)
+                        _circleCollider.enabled = false;
+
+                    TryGetComponent(out Rigidbody2D rigidbody);
+                    if (rigidbody != null)
+                    {
+                        rigidbody.gravityScale = 1f;
+                        rigidbody.velocity = new Vector3(Random.Range(-_explodeSpeed, _explodeSpeed), Random.Range(-_explodeSpeed, _explodeSpeed), 0f);
+                    }
+                    BubbleState = "Fall";
+                    break;
+
+                case "Fall":
+                    if (transform.position.y < _collapsePointY)
+                        Destroy(gameObject);
+                    break;
+            }
+        }
+
         #endregion
     }
 }

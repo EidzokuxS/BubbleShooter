@@ -36,15 +36,11 @@ namespace BubbleShooter
         #region Public API
         public void LoadBubble()
         {
-            {
-                ChangeCurrentProjectileType();
-                _nextProjectile = null;
-                _nextProjectile = Instantiate(_projectilePrefab, transform.position, transform.rotation);
-                _nextProjectile.gameObject.SetActive(true);
-                _currentProjectile = _nextProjectile;
-
-                _nextProjectile.GetComponent<CircleCollider2D>().enabled = false;
-            }
+            ChangeCurrentProjectileType();
+            _nextProjectile = null;
+            _nextProjectile = Instantiate(_projectilePrefab, transform.position, transform.rotation);
+            _nextProjectile.gameObject.SetActive(true);
+            _currentProjectile = _nextProjectile;
         }
 
         #endregion

@@ -5,13 +5,11 @@ namespace BubbleShooter
 {
     public class Projectile : MonoBehaviour
     {
-        public enum BubbleTypeQueue { Cycle, Random }
-
         public UnityEvent OnHit;
 
         [SerializeField] private SpriteRenderer _nextBallPreview;
         [SerializeField] private Sprite[] _bubbleVariants;
-        [SerializeField] private BubbleTypeQueue _bubbleTypeQueue;
+        [SerializeField] private bool _isBubbleTypeQueueFixed;
 
         private SpriteRenderer _projectileBubbleSprite;
         private BubbleGroupController _gridManager;
@@ -22,34 +20,23 @@ namespace BubbleShooter
         private void Awake()
         {
             transform.parent = LevelController.Instance.transform;
+            GameStateController.OnLevelRestart += DestroyCurrentProjectile;
         }
 
         void Start()
         {
             _projectileBubbleSprite = GetComponent<SpriteRenderer>();
             _nextBallPreview = GameObject.Find("BubblePreview").GetComponent<SpriteRenderer>();
-
-            switch (_bubbleTypeQueue)
-            {
-                case BubbleTypeQueue.Cycle:
-                    _bubbleType = LevelController.Instance.GetComponentInChildren<Launcher>().CurrentProjectileType;
-                    break;
-                case BubbleTypeQueue.Random:
-                    _bubbleType = Random.Range(1, _bubbleVariants.Length + 1);
-                    break;
-            }
-
-            _nextBallPreview.sprite = _bubbleVariants[_bubbleType - 1];
-            _projectileBubbleSprite.enabled = false;
-
             _gridManager = transform.parent.GetComponent<BubbleGroupController>();
 
-            TryGetComponent(out SpriteRenderer spriteRenderer);
-            if (spriteRenderer != null)
-            {
-                spriteRenderer.sprite = _bubbleVariants[_bubbleType - 1];
-            }
+            if (_isBubbleTypeQueueFixed)
+                _bubbleType = LevelController.Instance.GetComponentInChildren<Launcher>().CurrentProjectileType;
+            else if (!_isBubbleTypeQueueFixed)
+                _bubbleType = Random.Range(1, _bubbleVariants.Length + 1);
+
+            ChangeBubbleType();
         }
+
 
         private void OnCollisionEnter2D(Collision2D collision)
         {
@@ -69,23 +56,36 @@ namespace BubbleShooter
                 }
 
             }
+
         }
 
+        private void OnDestroy()
+        {
+            GameStateController.OnLevelRestart -= DestroyCurrentProjectile;
+        }
         #endregion
 
         #region Public API
 
-        public void SwitchBubbleQueueType(bool isfixed)
+        public void SwitchBubbleQueueType(bool isFixed)
         {
-            if (isfixed)
-                _bubbleTypeQueue = BubbleTypeQueue.Cycle;
-            if (!isfixed)
-                _bubbleTypeQueue = BubbleTypeQueue.Random;
+            _isBubbleTypeQueueFixed = isFixed;
         }
 
         #endregion
 
         #region Private API
+        private void ChangeBubbleType()
+        {
+            _nextBallPreview.sprite = _bubbleVariants[_bubbleType - 1];
+            _projectileBubbleSprite.enabled = false;
+
+            TryGetComponent(out SpriteRenderer spriteRenderer);
+            if (spriteRenderer != null)
+            {
+                spriteRenderer.sprite = _bubbleVariants[_bubbleType - 1];
+            }
+        }
 
         private void CollideImpact()
         {
@@ -97,9 +97,15 @@ namespace BubbleShooter
             _gridManager.SearchThroughBubbleMap(newBubble.BubbleRow, -newBubble.BubbleColumns, newBubble.BubbleType);
 
             OnHit.Invoke();
+            DestroyCurrentProjectile();
+        }
+
+        private void DestroyCurrentProjectile()
+        {
             Destroy(gameObject);
         }
         #endregion
     }
+
 
 }

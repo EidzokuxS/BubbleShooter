@@ -55,7 +55,6 @@ namespace BubbleShooter
 
         #region Public API
 
-
         public void ChooseBubbleGroupLevel(int level)
         {
             if (level > 0)
@@ -64,13 +63,12 @@ namespace BubbleShooter
                 _chosenLevel = level;
             }
 
-            if (level == 0)
+            else if (level == 0)
             {
                 _arrangementMethod = BubbleArrangementMethod.Generate;
             }
 
         }
-
 
         public Vector3 Snap(Vector3 position)
         {
@@ -85,21 +83,13 @@ namespace BubbleShooter
                 else
                     objectSnap.x -= 0.5f;
             }
+
             return _initialPosition + objectSnap * gap;
         }
 
-
-
         public Bubble InitiateBubble(Vector2 position, int bubbleType)
         {
-            Vector3 snappedPosition = Snap(position);
-            int column = (int)Mathf.Round((snappedPosition.y - _initialPosition.y) / gap);
-            int row;
-            if (column % 2 != 0)
-                row = (int)Mathf.Round((snappedPosition.x - _initialPosition.x) / gap - 0.5f);
-            else
-                row = (int)Mathf.Round((snappedPosition.x - _initialPosition.x) / gap);
-
+            DefineBubblePosition(position, out Vector3 snappedPosition, out int column, out int row);
 
             Bubble bubbleClone = Instantiate(_bubblePrefab, snappedPosition, Quaternion.identity);
             bubbleClone.transform.parent = _bubbleGroup;
@@ -113,22 +103,8 @@ namespace BubbleShooter
                 return null;
             }
 
-            TryGetComponent(out CircleCollider2D collider);
-            if (collider != null)
-            {
-                collider.isTrigger = true;
-            }
+            ConfigureBubble(bubbleType, column, row, bubbleClone);
 
-            bubbleClone.TryGetComponent(out Bubble gridMember);
-            if (gridMember != null)
-            {
-                if (bubbleType < _bubblePrefab.BubbleSprites.Length)
-                    gridMember.SetGridPosition(column, row, bubbleType);
-
-                bubbleClone.TryGetComponent(out SpriteRenderer spriteRenderer);
-                if (spriteRenderer != null)
-                    spriteRenderer.sprite = gridMember.BubbleSprites[gridMember.BubbleType];
-            }
             bubbleClone.gameObject.SetActive(true);
             try
             {
@@ -139,75 +115,38 @@ namespace BubbleShooter
             return bubbleClone;
         }
 
-
         public void SearchThroughBubbleMap(int row, int column, int type)
         {
             int[] coordinatesPair = new int[2] { row, column };
 
-            bool[,] visitedCoordinates = new bool[_rows, _columns];
+            CheckBubbleChainConnections(row, column, type, coordinatesPair, out Queue<GameObject> objectQueue, out int elementCounter);
 
-            visitedCoordinates[row, column] = true;
+            ApplyValidBubbleConnectionsDestruction(objectQueue, elementCounter);
 
-            int[] deltaX = { -1, 0, -1, 0, -1, 1 };
-            int[] deltaXPrime = { 1, 0, 1, 0, -1, 1 };
-            int[] deltaY = { -1, -1, 1, 1, 0, 0 };
+            CheckBubbleAttachment(0);
+        }
 
+        private void CheckBubbleAttachment(int ceiling)
+        {
+            InitializeCoordinateQueue(out bool[,] visitedCoordinates, out int[] deltaX, out int[] deltaXPrime, out int[] deltaY, out Queue<int[]> coordinatePairQueue);
 
-            Queue<int[]> coordinatePairQueue = new();
-            Queue<GameObject> objectQueue = new();
+            for (int i = 0; i < _rows; i++)
+            {
+                int[] coordinatePair = new int[2] { i, ceiling };
+                if (_bubbleMap[i, ceiling] != null)
+                {
+                    visitedCoordinates[i, ceiling] = true;
+                    coordinatePairQueue.Enqueue(coordinatePair);
+                }
+            }
 
-            coordinatePairQueue.Enqueue(coordinatesPair);
-
-            int elementCounter = 0;
             while (coordinatePairQueue.Count != 0)
             {
                 int[] firstElement = coordinatePairQueue.Dequeue();
-                Bubble firstBubble = _bubbleMap[firstElement[0], firstElement[1]];
-                if (firstBubble != null)
-                {
-                    objectQueue.Enqueue(firstBubble.gameObject);
-                }
-                elementCounter += 1;
-                for (int i = 0; i < 6; i++)
-                {
-                    int[] neighborElement = new int[2];
-                    if (firstElement[1] % 2 == 0)
-                        neighborElement[0] = firstElement[0] + deltaX[i];
-                    else
-                        neighborElement[0] = firstElement[0] + deltaXPrime[i];
-
-                    neighborElement[1] = firstElement[1] + deltaY[i];
-                    try
-                    {
-                        Bubble bubble = _bubbleMap[neighborElement[0], neighborElement[1]];
-                        if (bubble != null && bubble.BubbleType == type)
-                        {
-                            if (!visitedCoordinates[neighborElement[0], neighborElement[1]])
-                            {
-                                visitedCoordinates[neighborElement[0], neighborElement[1]] = true;
-                                coordinatePairQueue.Enqueue(neighborElement);
-                            }
-                        }
-
-                    }
-                    catch (System.IndexOutOfRangeException) { }
-                }
+                CycleThroughBubbleQueue(visitedCoordinates, deltaX, deltaXPrime, deltaY, coordinatePairQueue, firstElement);
             }
-            if (elementCounter >= _comboCounter)
-            {
-                while (objectQueue.Count != 0)
-                {
-                    objectQueue.Dequeue().TryGetComponent(out Bubble bubble);
-                    if (bubble != null)
-                    {
-                        _bubbleMap[bubble.BubbleRow, -bubble.BubbleColumns] = null;
-                        bubble.SetBubbleState("Pop");
-                        _points++;
-                        OnScoreChange.Invoke();
-                    }
-                }
-            }
-            CheckCeiling(0);
+
+            ApplyValidBubbleConnectionsDestruction(visitedCoordinates);
         }
 
         public void InitializeGroup()
@@ -237,63 +176,152 @@ namespace BubbleShooter
             OnScoreChange.Invoke();
         }
 
-
-        private void CheckCeiling(int ceiling)
+        private void DefineBubblePosition(Vector2 position, out Vector3 snappedPosition, out int column, out int row)
         {
+            snappedPosition = Snap(position);
+            column = (int)Mathf.Round((snappedPosition.y - _initialPosition.y) / gap);
+            if (column % 2 != 0)
+                row = (int)Mathf.Round((snappedPosition.x - _initialPosition.x) / gap - 0.5f);
+            else
+                row = (int)Mathf.Round((snappedPosition.x - _initialPosition.x) / gap);
+        }
 
-            bool[,] visitedCoordinates = new bool[_rows, _columns];
-
-            Queue<int[]> coordinatePairQueue = new();
-
-            int[] deltaX = { -1, 0, -1, 0, -1, 1 };
-            int[] deltaXPrime = { 1, 0, 1, 0, -1, 1 };
-            int[] deltaY = { -1, -1, 1, 1, 0, 0 };
-
-            for (int i = 0; i < _rows; i++)
+        private void ConfigureBubble(int bubbleType, int column, int row, Bubble bubbleClone)
+        {
+            TryGetComponent(out CircleCollider2D collider);
+            if (collider != null)
             {
-                int[] pair = new int[2] { i, ceiling };
-                if (_bubbleMap[i, ceiling] != null)
-                {
-                    visitedCoordinates[i, ceiling] = true;
-                    coordinatePairQueue.Enqueue(pair);
-                }
+                collider.isTrigger = true;
             }
 
-            int elementCounter = 0;
+            bubbleClone.TryGetComponent(out Bubble gridMember);
+            if (gridMember != null)
+            {
+                if (bubbleType < _bubblePrefab.BubbleSprites.Length)
+                    gridMember.SetGridPosition(column, row, bubbleType);
+
+                bubbleClone.TryGetComponent(out SpriteRenderer spriteRenderer);
+                if (spriteRenderer != null)
+                    spriteRenderer.sprite = gridMember.BubbleSprites[gridMember.BubbleType];
+            }
+        }
+
+        private void CheckBubbleChainConnections(int row, int column, int type, int[] coordinatesPair, out Queue<GameObject> objectQueue, out int elementCounter)
+        {
+            InitializeCoordinateQueue(out bool[,] visitedCoordinates, out int[] deltaX, out int[] deltaXPrime, out int[] deltaY, out Queue<int[]> coordinatePairQueue);
+
+            visitedCoordinates[row, column] = true;
+
+            objectQueue = new();
+            coordinatePairQueue.Enqueue(coordinatesPair);
+
+            elementCounter = 0;
             while (coordinatePairQueue.Count != 0)
             {
                 int[] firstElement = coordinatePairQueue.Dequeue();
-                elementCounter += 1;
-                for (int i = 0; i < 6; i++)
+                Bubble firstBubble = _bubbleMap[firstElement[0], firstElement[1]];
+                if (firstBubble != null)
                 {
-                    int[] neighborElement = new int[2];
-                    if (firstElement[1] % 2 == 0)
+                    objectQueue.Enqueue(firstBubble.gameObject);
+                }
+                elementCounter += 1;
+                CycleThroughBubbleQueue(type, visitedCoordinates, deltaX, deltaXPrime, deltaY, coordinatePairQueue, firstElement);
+            }
+        }
+
+        private void InitializeCoordinateQueue(out bool[,] visitedCoordinates, out int[] deltaX, out int[] deltaXPrime, out int[] deltaY, out Queue<int[]> coordinatePairQueue)
+        {
+            visitedCoordinates = new bool[_rows, _columns];
+            deltaX = new int[] { -1, 0, -1, 0, -1, 1 };
+            deltaXPrime = new int[] { 1, 0, 1, 0, -1, 1 };
+            deltaY = new int[] { -1, -1, 1, 1, 0, 0 };
+            coordinatePairQueue = new();
+        }
+
+        private void CycleThroughBubbleQueue(int type, bool[,] visitedCoordinates, int[] deltaX, int[] deltaXPrime, int[] deltaY, Queue<int[]> coordinatePairQueue, int[] firstElement)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                int[] neighborElement = new int[2];
+                if (firstElement[1] % 2 == 0)
+                    neighborElement[0] = firstElement[0] + deltaX[i];
+                else
+                    neighborElement[0] = firstElement[0] + deltaXPrime[i];
+
+                neighborElement[1] = firstElement[1] + deltaY[i];
+                try
+                {
+                    CheckBubbleCorrect(type, visitedCoordinates, coordinatePairQueue, neighborElement);
+                }
+                catch (System.IndexOutOfRangeException) { }
+            }
+        }
+
+        private void CycleThroughBubbleQueue(bool[,] visitedCoordinates, int[] deltaX, int[] deltaXPrime, int[] deltaY, Queue<int[]> coordinatePairQueue, int[] firstElement)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                int[] neighborElement = new int[2];
+                if (firstElement[1] % 2 == 0)
+                    neighborElement[0] = firstElement[0] + deltaX[i];
+                else
+                    neighborElement[0] = firstElement[0] + deltaXPrime[i];
+
+                neighborElement[1] = firstElement[1] + deltaY[i];
+                try
+                {
+                    CheckBubbleCorrect(visitedCoordinates, coordinatePairQueue, neighborElement);
+                }
+                catch (System.IndexOutOfRangeException) { }
+            }
+        }
+
+        private void CheckBubbleCorrect(int type, bool[,] visitedCoordinates, Queue<int[]> coordinatePairQueue, int[] neighborElement)
+        {
+            Bubble bubble = _bubbleMap[neighborElement[0], neighborElement[1]];
+            if (bubble != null && bubble.BubbleType == type)
+            {
+                if (!visitedCoordinates[neighborElement[0], neighborElement[1]])
+                {
+                    visitedCoordinates[neighborElement[0], neighborElement[1]] = true;
+                    coordinatePairQueue.Enqueue(neighborElement);
+                }
+            }
+        }
+
+        private void CheckBubbleCorrect(bool[,] visitedCoordinates, Queue<int[]> coordinatePairQueue, int[] neighborElement)
+        {
+            Bubble bubble = _bubbleMap[neighborElement[0], neighborElement[1]];
+            if (bubble != null)
+            {
+                if (!visitedCoordinates[neighborElement[0], neighborElement[1]])
+                {
+                    visitedCoordinates[neighborElement[0], neighborElement[1]] = true;
+                    coordinatePairQueue.Enqueue(neighborElement);
+                }
+            }
+        }
+
+        private void ApplyValidBubbleConnectionsDestruction(Queue<GameObject> objectQueue, int elementCounter)
+        {
+            if (elementCounter >= _comboCounter)
+            {
+                while (objectQueue.Count != 0)
+                {
+                    objectQueue.Dequeue().TryGetComponent(out Bubble bubble);
+                    if (bubble != null)
                     {
-                        neighborElement[0] = firstElement[0] + deltaX[i];
-                    }
-                    else
-                    {
-                        neighborElement[0] = firstElement[0] + deltaXPrime[i];
-                    }
-                    neighborElement[1] = firstElement[1] + deltaY[i];
-                    try
-                    {
-                        Bubble bubble = _bubbleMap[neighborElement[0], neighborElement[1]];
-                        if (bubble != null)
-                        {
-                            if (!visitedCoordinates[neighborElement[0], neighborElement[1]])
-                            {
-                                visitedCoordinates[neighborElement[0], neighborElement[1]] = true;
-                                coordinatePairQueue.Enqueue(neighborElement);
-                            }
-                        }
-                    }
-                    catch (System.IndexOutOfRangeException)
-                    {
+                        _bubbleMap[bubble.BubbleRow, -bubble.BubbleColumns] = null;
+                        bubble.SetBubbleState("Pop");
+                        _points++;
+                        OnScoreChange.Invoke();
                     }
                 }
             }
+        }
 
+        private void ApplyValidBubbleConnectionsDestruction(bool[,] visitedCoordinates)
+        {
             for (int x = 0; x < _rows; x++)
             {
                 for (int y = 0; y < _columns; y++)
@@ -312,7 +340,6 @@ namespace BubbleShooter
                     }
                 }
             }
-
         }
 
         private void ArragementBubble(string level)
@@ -339,26 +366,27 @@ namespace BubbleShooter
                         levelPosition++;
                     }
 
-                    if (level[levelPosition] == '0')
+                    switch (level[levelPosition])
                     {
-                        levelPosition++;
-                        continue;
+                        case '0':
+                            levelPosition++;
+                            continue;
+                        case '1':
+                            newBubbleType = 1;
+                            break;
+                        case '2':
+                            newBubbleType = 2;
+                            break;
+                        case '3':
+                            newBubbleType = 3;
+                            break;
+                        case '4':
+                            newBubbleType = 4;
+                            break;
+                        case '5':
+                            newBubbleType = 5;
+                            break;
                     }
-                    if (level[levelPosition] == '1')
-                        newBubbleType = 1;
-
-                    if (level[levelPosition] == '2')
-                        newBubbleType = 2;
-
-                    if (level[levelPosition] == '3')
-                        newBubbleType = 3;
-
-                    if (level[levelPosition] == '4')
-                        newBubbleType = 4;
-
-                    if (level[levelPosition] == '5')
-                        newBubbleType = 5;
-
 
                     InitiateBubble(position, newBubbleType);
                     levelPosition++;
@@ -379,7 +407,6 @@ namespace BubbleShooter
             return level;
         }
         #endregion
-
 
 #if UNITY_EDITOR
         private void OnDrawGizmos()
